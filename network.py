@@ -17,9 +17,9 @@ VALID_PATH = DATA_PATH + '/valid'
 TEST_PATH = DATA_PATH + '/test'
 
 VALID_SIZE = 100
-MB_SIZE = 40
+MB_SIZE = 35
 NUM_EPOCHS = 15
-LR = 0.00005
+LR = 0.0001
 NUM_CLASSES=28
 STAT_PERIOD=30
 
@@ -160,12 +160,12 @@ class CelebrityNet(torch.nn.Module):
 
         # size 250
 
-        self.conv1 = nn.Conv2d(in_channels=3, out_channels=32, kernel_size=5, padding=2)
-        self.bn1 = nn.BatchNorm2d(num_features=32, track_running_stats=False)
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=64, kernel_size=5, padding=2)
+        self.bn1 = nn.BatchNorm2d(num_features=64, track_running_stats=False)
 
         self.pool1 = nn.MaxPool2d(kernel_size=3)  # size 83
 
-        self.conv2 = nn.Conv2d(in_channels=32, out_channels=128, kernel_size=5, padding=2)
+        self.conv2 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=5, padding=2)
         self.bn2 = nn.BatchNorm2d(num_features=128, track_running_stats=False)
 
         self.pool2 = nn.MaxPool2d(kernel_size=3)  # size 27
