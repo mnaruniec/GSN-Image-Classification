@@ -24,8 +24,8 @@ MB_SIZE = 30
 STAT_PERIOD = 30
 
 NUM_EPOCHS = 15
-LR = 0.0001
-WEIGHT_DECAY = 0.01
+LR = 0.001
+WEIGHT_DECAY = 0.02
 
 DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 if not torch.cuda.is_available():
@@ -64,7 +64,7 @@ class PreprocessDataLoader(DataLoader):
 
 class GPUDataLoader(PreprocessDataLoader):
     def preprocess(self, x, y):
-        return x.to(DEVICE), y.to(DEVICE)
+        return x.float().to(DEVICE), y.to(DEVICE)
 
 
 def load_dir(dir: str, shuffle=True, drop_last=False, mean_var: Optional[Tuple[Tensor, Tensor]] = None):
@@ -107,12 +107,12 @@ def load_dir(dir: str, shuffle=True, drop_last=False, mean_var: Optional[Tuple[T
 
 
 def get_dataloaders() -> (DataLoader, DataLoader, DataLoader):
-    # TODO remove
+    # TODO
     mean_var = (torch.tensor([0.47, 0.38, 0.32]), torch.tensor([0.3, 0.25, 0.25]))
 
     train, cl1 = load_dir(TRAIN_PATH, mean_var=mean_var, drop_last=True)
-    valid, cl2 = load_dir(VALID_PATH, mean_var=mean_var, drop_last=True)
-    test, cl3 = load_dir(TEST_PATH, mean_var=mean_var, drop_last=False)
+    # valid, cl2 = load_dir(VALID_PATH, mean_var=mean_var, drop_last=True)
+    valid, cl2 = test, cl3 = load_dir(TEST_PATH, mean_var=mean_var, drop_last=False)
 
     assert cl1 == cl2
     assert cl2 == cl3
@@ -126,32 +126,32 @@ class CelebrityNet(torch.nn.Module):
 
         # size 250
         out_channels1 = 64
-        out_channels2 = 128
+        out_channels2 = 64
 
-        out_channels3 = 256
-        out_channels4 = 512
-        out_lin1 = 2 ** 10
+        out_channels3 = 64
+        out_channels4 = 64
+        out_lin1 = 128
 
         self.layers = torch.nn.Sequential(*[
             nn.Conv2d(in_channels=3, out_channels=out_channels1, kernel_size=3),
             nn.BatchNorm2d(num_features=out_channels1, track_running_stats=False),
-            nn.ReLU(),
             nn.MaxPool2d(kernel_size=3),  # size 82
+            nn.ReLU(),
 
             nn.Conv2d(in_channels=out_channels1, out_channels=out_channels2, kernel_size=3),
             nn.BatchNorm2d(num_features=out_channels2, track_running_stats=False),
-            nn.ReLU(),
             nn.MaxPool2d(kernel_size=3),  # size 26
+            nn.ReLU(),
 
             nn.Conv2d(in_channels=out_channels2, out_channels=out_channels3, kernel_size=3),
             nn.BatchNorm2d(num_features=out_channels3, track_running_stats=False),
-            nn.ReLU(),
             nn.MaxPool2d(kernel_size=3),  # size 8
+            nn.ReLU(),
 
             nn.Conv2d(in_channels=out_channels3, out_channels=out_channels4, kernel_size=3),
             nn.BatchNorm2d(num_features=out_channels4, track_running_stats=False),
-            nn.ReLU(),
             nn.MaxPool2d(kernel_size=3),  # size 2
+            nn.ReLU(),
 
             nn.Flatten(),
 
@@ -180,7 +180,7 @@ class CelebrityTrainer:
 
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = optim.Adam(self.net.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
-        # self.optimizer = optim.SGD(net.parameters(), lr=LR, momentum=0.9, weight_decay=0.05)
+        # self.optimizer = optim.SGD(self.net.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
 
     def evaluate_on(self, dataloader: DataLoader, full=False) -> (float, int, float):
         with torch.no_grad():
@@ -280,7 +280,7 @@ class CelebrityTrainer:
 
 
 def main():
-    prepare_data_dir()
+    # prepare_data_dir()
     trainer = CelebrityTrainer()
     trainer.train()
 
