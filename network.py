@@ -21,7 +21,7 @@ NUM_CLASSES = 28
 
 VALID_SIZE = 100
 MB_SIZE = 30
-STAT_PERIOD = 30
+STAT_PERIOD = 100
 
 NUM_EPOCHS = 15
 LR = 0.001
@@ -97,7 +97,7 @@ def load_dir(dir: str, shuffle=True, drop_last=False, mean_var: Optional[Tuple[T
 
     dataset = ImageFolder(dir, transform=torchvision.transforms.Compose([
         torchvision.transforms.ToTensor(),
-        torchvision.transforms.Normalize(mean=mean, std=torch.sqrt(var)),
+        # TODO torchvision.transforms.Normalize(mean=mean, std=torch.sqrt(var)),
     ]))
 
     return (
@@ -133,31 +133,33 @@ class CelebrityNet(torch.nn.Module):
         out_lin1 = 128
 
         self.layers = torch.nn.Sequential(*[
+            nn.BatchNorm2d(num_features=3, track_running_stats=False),
+
             nn.Conv2d(in_channels=3, out_channels=out_channels1, kernel_size=3),
-            nn.BatchNorm2d(num_features=out_channels1, track_running_stats=False),
             nn.MaxPool2d(kernel_size=3),  # size 82
             nn.ReLU(),
+            nn.BatchNorm2d(num_features=out_channels1, track_running_stats=False),
 
             nn.Conv2d(in_channels=out_channels1, out_channels=out_channels2, kernel_size=3),
-            nn.BatchNorm2d(num_features=out_channels2, track_running_stats=False),
             nn.MaxPool2d(kernel_size=3),  # size 26
             nn.ReLU(),
+            nn.BatchNorm2d(num_features=out_channels2, track_running_stats=False),
 
             nn.Conv2d(in_channels=out_channels2, out_channels=out_channels3, kernel_size=3),
-            nn.BatchNorm2d(num_features=out_channels3, track_running_stats=False),
             nn.MaxPool2d(kernel_size=3),  # size 8
             nn.ReLU(),
+            nn.BatchNorm2d(num_features=out_channels3, track_running_stats=False),
 
             nn.Conv2d(in_channels=out_channels3, out_channels=out_channels4, kernel_size=3),
-            nn.BatchNorm2d(num_features=out_channels4, track_running_stats=False),
             nn.MaxPool2d(kernel_size=3),  # size 2
             nn.ReLU(),
+            nn.BatchNorm2d(num_features=out_channels4, track_running_stats=False),
 
             nn.Flatten(),
 
             nn.Linear(in_features=2 * 2 * out_channels4, out_features=out_lin1),
-            nn.BatchNorm1d(num_features=out_lin1, track_running_stats=False),
             nn.ReLU(),
+            nn.BatchNorm1d(num_features=out_lin1, track_running_stats=True),
 
             nn.Linear(in_features=out_lin1, out_features=NUM_CLASSES)
         ])
@@ -244,14 +246,15 @@ class CelebrityTrainer:
 
         try:
             for epoch in range(NUM_EPOCHS):
-                running_loss = 0.0
+                train_loss = 0.0
+
                 for i, data in enumerate(self.train_dl, 0):
-                    running_loss += self.train_batch(data)
+                    train_loss += self.train_batch(data)
 
                     if i % STAT_PERIOD == STAT_PERIOD - 1:
                         epoch_x += 1
 
-                        train_loss = running_loss / STAT_PERIOD
+                        train_loss = train_loss / STAT_PERIOD
                         train_losses.append(train_loss)
 
                         acc, total, valid_loss = self.evaluate_on(self.valid_dl)
@@ -260,10 +263,11 @@ class CelebrityTrainer:
 
                         print('Epoch %d, batch %d, loss: %.4f, valid loss: %.4f' %
                               (epoch + 1, i + 1, train_loss, valid_loss))
-                        running_loss = 0.0
 
-                loss = self.run_evaluation(self.valid_dl, 'VALID')
-                epoch_losses.append(loss)
+                        train_loss = 0.0
+
+                epoch_loss = self.run_evaluation(self.valid_dl, 'VALID')
+                epoch_losses.append(epoch_loss)
                 epoch_xs.append(epoch_x)
 
                 self.run_evaluation(self.train_dl, 'TRAIN')
