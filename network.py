@@ -5,7 +5,6 @@ from typing import Optional, Tuple
 
 import torch
 import torchvision
-import torch.nn.functional as F
 from torch import nn, optim, Tensor
 from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
@@ -24,8 +23,8 @@ MB_SIZE = 30
 STAT_PERIOD = 100
 
 NUM_EPOCHS = 15
-LR = 0.001
-WEIGHT_DECAY = 0.02
+LR = 0.0001
+WEIGHT_DECAY = 0.001
 
 DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 if not torch.cuda.is_available():
@@ -125,12 +124,12 @@ class CelebrityNet(torch.nn.Module):
         super().__init__()
 
         # size 250
-        out_channels1 = 64
-        out_channels2 = 64
+        out_channels1 = 128
+        out_channels2 = 128
 
-        out_channels3 = 64
-        out_channels4 = 64
-        out_lin1 = 128
+        out_channels3 = 256
+        out_channels4 = 512
+        out_lin1 = 1024
 
         self.layers = torch.nn.Sequential(*[
             nn.BatchNorm2d(num_features=3, track_running_stats=False),
