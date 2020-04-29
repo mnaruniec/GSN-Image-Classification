@@ -10,16 +10,20 @@ from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
 from matplotlib import pyplot as plt
 
+from batch_norm import BatchNorm1d, BatchNorm2d
+
 DATA_PATH = 'dnn2020-1'
 
 TRAIN_PATH = DATA_PATH + '/train'
 VALID_PATH = DATA_PATH + '/valid'
 TEST_PATH = DATA_PATH + '/test'
 
+CREATE_VALID = True
+
 NUM_CLASSES = 28
 
 VALID_SIZE = 100
-MB_SIZE = 30
+MB_SIZE = 16
 STAT_PERIOD = 100
 
 NUM_EPOCHS = 15
@@ -33,7 +37,7 @@ if not torch.cuda.is_available():
 
 def prepare_data_dir() -> None:
     ''' If validation dir does not exist, use stratified subset from training data. '''
-    if not os.path.isdir(VALID_PATH):
+    if CREATE_VALID and not os.path.isdir(VALID_PATH):
         print('Validation set not found, creating.')
 
         os.mkdir(VALID_PATH)
@@ -49,6 +53,10 @@ def prepare_data_dir() -> None:
 
             for f in files[:VALID_SIZE]:
                 os.rename(from_path + '/' + f, to_path + '/' + f)
+
+    elif not CREATE_VALID and os.path.isdir(VALID_PATH):
+        print('Running without validation set, but ' + VALID_PATH + 'dir found. Recreate data dir before running.')
+        exit(1)
 
 
 class PreprocessDataLoader(DataLoader):
@@ -110,8 +118,8 @@ def get_dataloaders() -> (DataLoader, DataLoader, DataLoader):
     mean_var = (torch.tensor([0.47, 0.38, 0.32]), torch.tensor([0.3, 0.25, 0.25]))
 
     train, cl1 = load_dir(TRAIN_PATH, mean_var=mean_var, drop_last=True)
-    # valid, cl2 = load_dir(VALID_PATH, mean_var=mean_var, drop_last=True)
-    valid, cl2 = test, cl3 = load_dir(TEST_PATH, mean_var=mean_var, drop_last=False)
+    valid, cl2 = load_dir(VALID_PATH if CREATE_VALID else TEST_PATH, mean_var=mean_var, drop_last=True)
+    test, cl3 = load_dir(TEST_PATH, mean_var=mean_var, drop_last=False)
 
     assert cl1 == cl2
     assert cl2 == cl3
@@ -125,40 +133,46 @@ class CelebrityNet(torch.nn.Module):
 
         # size 250
         out_channels1 = 128
-        out_channels2 = 128
+        out_channels2 = 256
 
         out_channels3 = 256
         out_channels4 = 512
-        out_lin1 = 1024
+        out_lin1 = 2048
 
         self.layers = torch.nn.Sequential(*[
-            nn.BatchNorm2d(num_features=3, track_running_stats=False),
+            # nn.BatchNorm2d(num_features=3, track_running_stats=False),
+            BatchNorm2d(num_features=3),
 
             nn.Conv2d(in_channels=3, out_channels=out_channels1, kernel_size=3),
             nn.MaxPool2d(kernel_size=3),  # size 82
             nn.ReLU(),
-            nn.BatchNorm2d(num_features=out_channels1, track_running_stats=False),
+            # nn.BatchNorm2d(num_features=out_channels1, track_running_stats=False),
+            BatchNorm2d(num_features=out_channels1),
 
             nn.Conv2d(in_channels=out_channels1, out_channels=out_channels2, kernel_size=3),
             nn.MaxPool2d(kernel_size=3),  # size 26
             nn.ReLU(),
-            nn.BatchNorm2d(num_features=out_channels2, track_running_stats=False),
+            # nn.BatchNorm2d(num_features=out_channels2, track_running_stats=False),
+            BatchNorm2d(num_features=out_channels2),
 
             nn.Conv2d(in_channels=out_channels2, out_channels=out_channels3, kernel_size=3),
             nn.MaxPool2d(kernel_size=3),  # size 8
             nn.ReLU(),
-            nn.BatchNorm2d(num_features=out_channels3, track_running_stats=False),
+            # nn.BatchNorm2d(num_features=out_channels3, track_running_stats=False),
+            BatchNorm2d(num_features=out_channels3),
 
             nn.Conv2d(in_channels=out_channels3, out_channels=out_channels4, kernel_size=3),
             nn.MaxPool2d(kernel_size=3),  # size 2
             nn.ReLU(),
-            nn.BatchNorm2d(num_features=out_channels4, track_running_stats=False),
+            # nn.BatchNorm2d(num_features=out_channels4, track_running_stats=False),
+            BatchNorm2d(num_features=out_channels4),
 
             nn.Flatten(),
 
             nn.Linear(in_features=2 * 2 * out_channels4, out_features=out_lin1),
             nn.ReLU(),
-            nn.BatchNorm1d(num_features=out_lin1, track_running_stats=True),
+            # nn.BatchNorm1d(num_features=out_lin1, track_running_stats=True),
+            BatchNorm1d(num_features=out_lin1),
 
             nn.Linear(in_features=out_lin1, out_features=NUM_CLASSES)
         ])
@@ -283,7 +297,7 @@ class CelebrityTrainer:
 
 
 def main():
-    # prepare_data_dir()
+    prepare_data_dir()
     trainer = CelebrityTrainer()
     trainer.train()
 

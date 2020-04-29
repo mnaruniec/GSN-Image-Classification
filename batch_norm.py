@@ -4,7 +4,7 @@ from torch.nn import Parameter
 
 
 class BatchNorm(torch.nn.Module):
-    eps = 1e-8
+    eps = 1e-05
 
     def __init__(self, parameter_shape, sum_dimensions):
         super().__init__()
@@ -13,27 +13,18 @@ class BatchNorm(torch.nn.Module):
         self.alpha = Parameter(torch.ones(*parameter_shape), requires_grad=True)
         self.beta = Parameter(torch.zeros(*parameter_shape), requires_grad=True)
 
-    def get_effective_batch_size(self, x):
-        result = 1
-        for dim in self.sum_dimensions:
-            result *= x.shape[dim]
-        return result
-
     def forward(self, x):
-        eff_batch_size = self.get_effective_batch_size(x)
-
-        mean = torch.sum(x, dim=self.sum_dimensions, keepdim=True)
-        mean /= eff_batch_size
+        mean = torch.mean(x, dim=self.sum_dimensions, keepdim=True)
 
         var = (x - mean) ** 2
-        var /= eff_batch_size
+        var = torch.mean(var, dim=self.sum_dimensions, keepdim=True)
 
         assert mean.shape == self.parameter_shape
         assert var.shape == self.parameter_shape
 
         normalized = (x - mean) / torch.sqrt(var + self.eps)
 
-        assert normalized.shape == self.parameter_shape
+        assert normalized.shape == x.shape
 
         return self.alpha * normalized + self.beta
 
