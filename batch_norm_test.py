@@ -24,6 +24,8 @@ def compare(input: torch.Tensor):
     correct = nn_cl(num_features=input.shape[1], track_running_stats=False).to(DEVICE)(input)
     out = custom_cl(num_features=input.shape[1]).to(DEVICE)(input)
 
+    assert correct.shape == out.shape
+
     diff = torch.abs(correct - out)
 
     m = torch.max(diff)
