@@ -5,12 +5,14 @@ from copy import deepcopy
 from functools import partial
 from typing import Optional, Tuple
 
+import numpy as np
 import torch
 import torchvision
 from torch import nn, optim, Tensor
 from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
 from matplotlib import pyplot as plt
+import seaborn as sns
 
 from batch_norm import BatchNorm1d, BatchNorm2d  # TODO remove in notebook
 
@@ -131,6 +133,17 @@ def load_dir(
     )
 
 
+def plot_confusion_matrix(cm):
+    ax = plt.subplot()
+    sns.heatmap(cm, annot=True, ax=ax)
+
+    ax.set_xlabel('Predicted labels')
+    ax.set_ylabel('True labels')
+    ax.set_title('Confusion Matrix')
+
+    plt.show()
+
+
 class CelebrityNet(torch.nn.Module):
     def __init__(
             self,
@@ -198,7 +211,7 @@ class CelebrityNet(torch.nn.Module):
 class CelebrityTrainer:
     def __init__(
             self,
-            optimizer_lambda = partial(optim.Adam, lr=DEFAULT_LR, weight_decay=DEFAULT_WEIGHT_DECAY),
+            optimizer_lambda = partial(optim.Adam, lr=DEFAULT_LR, weight_decay=DEFAULT_WEIGHT_DECAY, amsgrad=True),
             mb_size=DEFAULT_MB_SIZE,
             num_epochs=DEFAULT_NUM_EPOCHS,
             patience=DEFAULT_PATIENCE,
@@ -221,6 +234,8 @@ class CelebrityTrainer:
         self.net = None
         self.criterion = None
         self.optimizer = None
+        self.classes = None
+        self.confusion_matrix = None
         self.train_dl, self.valid_dl, self.test_dl = self.get_dataloaders()
 
     def init_net(self):
@@ -244,9 +259,11 @@ class CelebrityTrainer:
         assert cl1 == cl2
         assert cl2 == cl3
 
+        self.classes = cl1
+
         return train, valid, test
 
-    def evaluate_on(self, dataloader: DataLoader, full=False) -> (float, int, float):
+    def evaluate_on(self, dataloader: DataLoader, full=False, store_cm=False) -> (float, int, float):
         with torch.no_grad():
             net = self.net
             net.eval()
@@ -256,6 +273,9 @@ class CelebrityTrainer:
 
             running_loss = 0.
             i = 0
+
+            if store_cm:
+                self.confusion_matrix = np.zeros((NUM_CLASSES, NUM_CLASSES), dtype=np.int)
 
             for data in dataloader:
                 i += 1
@@ -268,18 +288,22 @@ class CelebrityTrainer:
                 loss = self.criterion(outputs, labels)
                 running_loss += loss.item()
 
+                if store_cm:
+                    for true, pred in zip(labels, predicted):
+                        self.confusion_matrix[true, pred] += 1
+
                 if not full and i >= self.stat_period:
                     break
 
         net.train()
         return correct / total, total, running_loss / i
 
-    def run_evaluation(self, dataloader, ds_name: str):
-        acc, total, loss = self.evaluate_on(dataloader, full=True)
+    def run_evaluation(self, dataloader, ds_name: str, store_cm=False):
+        acc, total, loss = self.evaluate_on(dataloader, full=True, store_cm=store_cm)
 
         print(f'{ds_name} stats: acc: {(100 * acc):.2f}%, loss: {loss:.4f}')
 
-        return loss
+        return acc, loss
 
     def train_batch(self, data):
         inputs, labels = data
@@ -295,7 +319,7 @@ class CelebrityTrainer:
 
         return loss.item()
 
-    def train(self, reset_net=True):
+    def train(self, reset_net=True, plot_loss=True):
         if reset_net:
             self.init_net()
 
@@ -312,6 +336,8 @@ class CelebrityTrainer:
 
         try:
             for epoch in range(1, self.num_epochs + 1):
+                print(f'EPOCH {epoch}')
+
                 train_loss = 0.0
                 last_epoch = epoch
 
@@ -333,7 +359,7 @@ class CelebrityTrainer:
 
                         train_loss = 0.0
 
-                epoch_loss = self.run_evaluation(self.valid_dl, 'VALID')
+                _, epoch_loss = self.run_evaluation(self.valid_dl, 'VALID')
 
                 epoch_losses.append(epoch_loss)
                 epoch_xs.append(epoch_x)
@@ -352,15 +378,19 @@ class CelebrityTrainer:
                     self.run_evaluation(self.train_dl, 'TRAIN')
 
         finally:
-            plt.plot(
-                range(len(train_losses)), train_losses, 'r',
-                range(len(valid_losses)), valid_losses, 'b',
-                epoch_xs, epoch_losses, 'g',
-            )
-            plt.show()
+            if plot_loss:
+                plt.plot(
+                    range(len(train_losses)), train_losses, 'r',
+                    range(len(valid_losses)), valid_losses, 'b',
+                    epoch_xs, epoch_losses, 'g',
+                )
+                plt.show()
 
             if best_state_dict and best_epoch != last_epoch:
                 print(f'Restoring snapshot from epoch {best_epoch} with valid loss: {best_epoch_loss:.4f}')
                 self.net.load_state_dict(best_state_dict)
 
-            self.run_evaluation(self.test_dl, 'TEST')
+            acc, loss = self.run_evaluation(self.test_dl, 'TEST', store_cm=True)
+            self.run_evaluation(self.train_dl, 'TRAIN')
+
+            return acc, loss

@@ -3,4 +3,5 @@ torchvision
 ipython
 matplotlib
 jupyter
+seaborn
 
