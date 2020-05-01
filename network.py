@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
 from matplotlib import pyplot as plt
 
-from batch_norm import BatchNorm1d, BatchNorm2d
+from batch_norm import BatchNorm1d, BatchNorm2d  # TODO remove in notebook
 
 DATA_PATH = 'dnn2020-1'
 
@@ -20,6 +20,8 @@ VALID_PATH = DATA_PATH + '/valid'
 TEST_PATH = DATA_PATH + '/test'
 
 NUM_CLASSES = 28
+IMG_SIZE = 250
+IMG_CHANNELS = 3
 
 DEFAULT_CREATE_VALID = True
 
@@ -30,6 +32,12 @@ DEFAULT_STAT_PERIOD = 100
 DEFAULT_NUM_EPOCHS = 15
 DEFAULT_LR = 0.0001
 DEFAULT_WEIGHT_DECAY = 0.001
+
+DEFAULT_CONV_CHANNELS = [128, 256, 256, 512]
+DEFAULT_CONV_SIZES = [3] * 4
+DEFAULT_MAX_POOL_SIZES = [3] * 4
+DEFAULT_FC_SIZES = [1024]
+DEFAULT_DROPOUT_P = 0.2
 
 DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 if not torch.cuda.is_available():
@@ -89,14 +97,14 @@ def load_dir(
         for img, _ in dataset:
             mean += torch.mean(img, dim=(1, 2), keepdim=True)
 
-        assert mean.shape == (3, 1, 1)
+        assert mean.shape == (IMG_CHANNELS, 1, 1)
         mean /= len(dataset)
 
         var = 0
         for img, _ in dataset:
             var += torch.sum((img - mean) ** 2, dim=(1, 2), keepdim=True) / (250 ** 2)
 
-        assert var.shape == (3, 1, 1)
+        assert var.shape == (IMG_CHANNELS, 1, 1)
         var /= len(dataset)
 
         mean = torch.squeeze(mean)
@@ -120,62 +128,68 @@ def load_dir(
     )
 
 
-
-
 class CelebrityNet(torch.nn.Module):
-    def __init__(self, batch_norm=True, custom_batch_norm=True):
+    def __init__(
+            self,
+            batch_norm=True,
+            custom_batch_norm=True,
+            conv_channels=DEFAULT_CONV_CHANNELS,
+            conv_sizes=DEFAULT_CONV_SIZES,
+            max_pool_sizes=DEFAULT_MAX_POOL_SIZES,
+            fc_sizes=DEFAULT_FC_SIZES,
+            dropout_p=DEFAULT_DROPOUT_P,
+    ):
         super().__init__()
 
-        # size 250
-        out_channels1 = 128
-        out_channels2 = 256
+        assert len(max_pool_sizes) == len(conv_sizes)
+        assert len(conv_channels) == len(conv_sizes)
 
-        out_channels3 = 256
-        out_channels4 = 512
-        out_lin1 = 2048
+        img_size = IMG_SIZE
 
-        self.layers = torch.nn.Sequential(*[
-            nn.Conv2d(in_channels=3, out_channels=out_channels1, kernel_size=3),
-            nn.MaxPool2d(kernel_size=3),  # size 82
-            nn.ReLU(),
-            # nn.BatchNorm2d(num_features=out_channels1, track_running_stats=False),
-            BatchNorm2d(num_features=out_channels1),
-            nn.Dropout2d(p=0.2),
+        self.layers = []
 
-            nn.Conv2d(in_channels=out_channels1, out_channels=out_channels2, kernel_size=3),
-            nn.MaxPool2d(kernel_size=3),  # size 26
-            nn.ReLU(),
-            # nn.BatchNorm2d(num_features=out_channels2, track_running_stats=False),
-            BatchNorm2d(num_features=out_channels2),
-            nn.Dropout2d(p=0.2),
+        for conv_size, in_channels, out_channels, pool_size in zip(
+                conv_sizes, [IMG_CHANNELS] + conv_channels, conv_channels, max_pool_sizes
+        ):
+            self.layers += [
+                nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=conv_size),
+                nn.MaxPool2d(kernel_size=pool_size),  # size 82
+                nn.ReLU(),
+            ]
 
-            nn.Conv2d(in_channels=out_channels2, out_channels=out_channels3, kernel_size=3),
-            nn.MaxPool2d(kernel_size=3),  # size 8
-            nn.ReLU(),
-            # nn.BatchNorm2d(num_features=out_channels3, track_running_stats=False),
-            BatchNorm2d(num_features=out_channels3),
-            nn.Dropout2d(p=0.2),
+            if batch_norm:
+                if custom_batch_norm:
+                    self.layers.append(BatchNorm2d(num_features=out_channels))
+                else:
+                    self.layers.append(nn.BatchNorm2d(num_features=out_channels, track_running_stats=False))
 
-            nn.Conv2d(in_channels=out_channels3, out_channels=out_channels4, kernel_size=3),
-            nn.MaxPool2d(kernel_size=3),  # size 2
-            nn.ReLU(),
-            # nn.BatchNorm2d(num_features=out_channels4, track_running_stats=False),
-            BatchNorm2d(num_features=out_channels4),
-            nn.Dropout2d(p=0.2),
+            self.layers.append(nn.Dropout2d(p=dropout_p))
 
-            nn.Flatten(),
+            img_size = img_size - conv_size + 1
+            img_size //= pool_size
 
-            nn.Linear(in_features=2 * 2 * out_channels4, out_features=out_lin1),
-            nn.ReLU(),
-            # nn.BatchNorm1d(num_features=out_lin1, track_running_stats=True),
-            BatchNorm1d(num_features=out_lin1),
-            nn.Dropout(p=0.2),
+        self.layers.append(nn.Flatten())
 
-            nn.Linear(in_features=out_lin1, out_features=NUM_CLASSES)
-        ])
+        fc_in = img_size * img_size * conv_channels[-1]
+
+        for in_size, out_size in zip([fc_in] + fc_sizes, fc_sizes):
+            self.layers += [
+                nn.Linear(in_features=in_size, out_features=out_size),
+                nn.ReLU(),
+            ]
+
+            if batch_norm:
+                if custom_batch_norm:
+                    self.layers.append(BatchNorm1d(num_features=out_size))
+                else:
+                    self.layers.append(nn.BatchNorm1d(num_features=out_size, track_running_stats=True))
+
+        self.layers.append(nn.Linear(in_features=fc_sizes[-1], out_features=NUM_CLASSES))
+
+        self.module = torch.nn.Sequential(*self.layers)
 
     def forward(self, x: torch.Tensor):
-        return self.layers(x)
+        return self.module(x)
 
 
 class CelebrityTrainer:
@@ -211,6 +225,7 @@ class CelebrityTrainer:
         self.optimizer = self.optimizer_lambda(self.net.parameters())
 
     def get_dataloaders(self) -> (DataLoader, DataLoader, DataLoader):
+        #  calculated on previous runs
         mean_var = (torch.tensor([0.47, 0.38, 0.32]), torch.tensor([0.3, 0.25, 0.25]))
 
         train, cl1 = load_dir(TRAIN_PATH, mean_var=mean_var, drop_last=True, mb_size=self.mb_size)
@@ -246,7 +261,6 @@ class CelebrityTrainer:
                 loss = self.criterion(outputs, labels)
                 running_loss += loss.item()
 
-                # TODO remove
                 if not full and i >= self.stat_period:
                     break
 
