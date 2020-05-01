@@ -1,6 +1,7 @@
 import os
 import random
 
+from copy import deepcopy
 from functools import partial
 from typing import Optional, Tuple
 
@@ -19,17 +20,19 @@ TRAIN_PATH = DATA_PATH + '/train'
 VALID_PATH = DATA_PATH + '/valid'
 TEST_PATH = DATA_PATH + '/test'
 
+DEFAULT_CREATE_VALID = True
+DEFAULT_VALID_SIZE = 100
+
 NUM_CLASSES = 28
 IMG_SIZE = 250
 IMG_CHANNELS = 3
 
-DEFAULT_CREATE_VALID = True
-
-DEFAULT_VALID_SIZE = 100
-DEFAULT_MB_SIZE = 16
+DEFAULT_MB_SIZE = 32
 DEFAULT_STAT_PERIOD = 100
 
 DEFAULT_NUM_EPOCHS = 15
+DEFAULT_PATIENCE = 3
+DEFAULT_EPOCH_TRAIN_EVAL = False
 DEFAULT_LR = 0.0001
 DEFAULT_WEIGHT_DECAY = 0.001
 
@@ -198,8 +201,10 @@ class CelebrityTrainer:
             optimizer_lambda = partial(optim.Adam, lr=DEFAULT_LR, weight_decay=DEFAULT_WEIGHT_DECAY),
             mb_size=DEFAULT_MB_SIZE,
             num_epochs=DEFAULT_NUM_EPOCHS,
+            patience=DEFAULT_PATIENCE,
             has_valid=DEFAULT_CREATE_VALID,
             stat_period=DEFAULT_STAT_PERIOD,
+            epoch_train_eval=DEFAULT_EPOCH_TRAIN_EVAL,
             **net_kwargs,
     ):
         self.net_kwargs = net_kwargs
@@ -207,9 +212,11 @@ class CelebrityTrainer:
         self.optimizer_lambda = optimizer_lambda
 
         self.mb_size = mb_size
-        self.num_epochs=num_epochs
+        self.num_epochs = num_epochs
+        self.patience = patience
         self.has_valid = has_valid
         self.stat_period = stat_period
+        self.epoch_train_eval = epoch_train_eval
 
         self.net = None
         self.criterion = None
@@ -298,9 +305,15 @@ class CelebrityTrainer:
         epoch_x = 0
         epoch_xs = []
 
+        last_epoch = 0
+        best_state_dict = None
+        best_epoch = 0
+        best_epoch_loss = 10 ** 9
+
         try:
-            for epoch in range(self.num_epochs):
+            for epoch in range(1, self.num_epochs + 1):
                 train_loss = 0.0
+                last_epoch = epoch
 
                 for i, data in enumerate(self.train_dl, 0):
                     train_loss += self.train_batch(data)
@@ -315,16 +328,28 @@ class CelebrityTrainer:
 
                         valid_losses.append(valid_loss)
 
-                        print('Epoch %d, batch %d, loss: %.4f, valid loss: %.4f' %
-                              (epoch + 1, i + 1, train_loss, valid_loss))
+                        print('Epoch %d, batch %d, train loss: %.4f, valid loss: %.4f' %
+                              (epoch, i + 1, train_loss, valid_loss))
 
                         train_loss = 0.0
 
                 epoch_loss = self.run_evaluation(self.valid_dl, 'VALID')
+
                 epoch_losses.append(epoch_loss)
                 epoch_xs.append(epoch_x)
 
-                self.run_evaluation(self.train_dl, 'TRAIN')
+                # early stopping & snapshotting
+                if epoch_loss < best_epoch_loss:
+                    best_epoch_loss = epoch_loss
+                    best_epoch = epoch
+                    best_state_dict = deepcopy(self.net.state_dict())
+                elif len(epoch_losses) > self.patience:
+                    if all((l > best_epoch_loss for l in epoch_losses[-(self.patience + 1):])):
+                        print(f'No improvement in last {self.patience + 1} epochs, early stopping.')
+                        break
+
+                if self.epoch_train_eval:
+                    self.run_evaluation(self.train_dl, 'TRAIN')
 
         finally:
             plt.plot(
@@ -334,14 +359,8 @@ class CelebrityTrainer:
             )
             plt.show()
 
+            if best_state_dict and best_epoch != last_epoch:
+                print(f'Restoring snapshot from epoch {best_epoch} with valid loss: {best_epoch_loss:.4f}')
+                self.net.load_state_dict(best_state_dict)
+
             self.run_evaluation(self.test_dl, 'TEST')
-
-
-def main():
-    prepare_data_dir()
-    trainer = CelebrityTrainer()
-    trainer.train()
-
-
-if __name__ == '__main__':
-    main()
